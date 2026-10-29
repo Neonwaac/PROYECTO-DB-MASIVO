@@ -1,0 +1,89 @@
+name: HeavyCult DataOps
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      apply_terraform:
+        description: "Aplicar Terraform manualmente"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heavycult-dataops-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-validation:
+    name: Validar Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: python -m pip install -r requirements.txt
+
+      - name: Compilar scripts Python
+        run: python -m compileall -q .
+
+      - name: Verificar imports principales
+        run: python -c "import boto3, pandas, pyarrow, pymongo, openpyxl; import google.cloud.bigquery; print('Dependencias principales OK')"
+
+  terraform-validation:
+    name: Validar Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+
+      - name: Formatear y validar estilo
+        run: terraform fmt -check -recursive
+
+      - name: Inicializar Terraform
+        run: terraform init -input=false
+
+      - name: Validar configuración
+        run: terraform validate
+
+      - name: Crear plan
+        run: terraform plan -input=false -no-color
+
+  terraform-apply:
+    name: Aplicar Terraform manualmente
+    needs: [python-validation, terraform-validation]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_terraform == true }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+
+      - name: Inicializar Terraform
+        run: terraform init -input=false
+
+      - name: Aplicar cambios
+        run: terraform apply -auto-approve -input=false
